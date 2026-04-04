@@ -1,11 +1,8 @@
 """
 Data models for the YouPol database.
 
-Each model corresponds to a table or view in the YT.POL_processed PostgreSQL
-database, exposed via the PostgREST API at https://data.you-pol.com/.
-
-All views are unified across YouTube and TikTok data. Use the ``platform``
-field to distinguish between platforms (``"youtube"`` or ``"tiktok"``).
+Each model corresponds to a table in the YT.POL_processed PostgreSQL database,
+exposed via the PostgREST API at https://data.you-pol.com/.
 """
 
 from dataclasses import dataclass, field
@@ -14,53 +11,41 @@ from datetime import date
 
 
 # ---------------------------------------------------------------------------
-# videos (unified view: videos_with_update)
+# videos
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Video:
-    """A video in the YouPol corpus (YouTube or TikTok).
+    """A YouTube video in the YouPol corpus.
 
-    View: ``videos_with_update`` (~23,500 rows)
+    Table: ``videos`` (~22,800 rows)
 
     This is the central table. Comments, transcripts, and speaker segments
     all reference a video via ``video_id``.
 
     Attributes:
-        video_id: Platform video ID (primary key).
-        channel_name: Display name of the channel.
+        video_id: YouTube video ID (primary key, e.g. ``"dQw4w9WgXcQ"``).
+        channel_name: Display name of the YouTube channel.
         video_title: Title of the video.
         video_views: Total view count at time of collection.
-        subscribers: Channel subscriber/follower count at time of collection.
+        subscribers: Channel subscriber count at time of collection.
         video_likes: Like count at time of collection.
         video_comments_count: Comment count at time of collection.
-        link: Full URL to the video.
-        tags: List of tags/hashtags assigned to the video.
+        link: Full YouTube URL.
+        tags: List of tags assigned to the video.
         duration: Video duration in seconds.
-        channel_id: Platform channel ID.
+        channel_id: YouTube channel ID.
         description: Video description text.
         upload_date: Date the video was uploaded.
-        suppressed: Whether the video has been suppressed/removed.
-        suppressed_at: Timestamp when the video was flagged as suppressed.
-        suppression_reason: Reason for suppression (deleted, deactivated,
-            terminated, members_only, unavailable).
+        suppressed: Whether the video has been suppressed/removed (default False).
         original_channel: Original channel name if the video was re-uploaded.
-        ideas: Annotated political orientation. Values: ``"Far_right"``,
-            ``"Left"``, ``"Masc"`` (Manosphere), ``"Comp"`` (Conspiracy).
+        ideas: Free-text annotation of main ideas/topics.
         gender: Gender of the main speaker. Values: ``"H"`` (male),
             ``"F"`` (female), ``"Mixte"`` (mixed/multiple speakers).
-        playlist: Whether the video belongs to a playlist.
+        playlist: Whether the video belongs to a playlist. Values:
+            ``"0"`` (no) or ``"1"`` (yes).
         country: Country of the channel. Values: ``"FR"`` (France),
             ``"QC"`` (Quebec/Canada).
-        age_restricted: Whether the video is age-restricted.
-        trashed_at: Timestamp when the video was trashed by admin (YouTube only).
-        trash_reason: Reason for trashing (YouTube only).
-        created_at: Timestamp when the video was added to the database.
-        updated_at: Timestamp of last update.
-        last_update: Timestamp of the last metadata scan.
-        status: Content status. Values: ``"active"``, ``"suppressed"``,
-            ``"trashed"``.
-        platform: Source platform. Values: ``"youtube"``, ``"tiktok"``.
     """
 
     video_id: Optional[str] = None
@@ -77,8 +62,6 @@ class Video:
     description: Optional[str] = None
     upload_date: Optional[str] = None
     suppressed: Optional[bool] = None
-    suppressed_at: Optional[str] = None
-    suppression_reason: Optional[str] = None
     original_channel: Optional[str] = None
     ideas: Optional[str] = None
     gender: Optional[str] = None
@@ -87,30 +70,27 @@ class Video:
     age_restricted: Optional[bool] = None
     trashed_at: Optional[str] = None
     trash_reason: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
     last_update: Optional[str] = None
     status: Optional[str] = None
-    platform: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# comments (unified view: comments_with_status)
+# comments
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Comment:
-    """A comment on a video in the corpus (YouTube or TikTok).
+    """A YouTube comment on a video in the corpus.
 
-    View: ``comments_with_status`` (~7.5M rows)
+    Table: ``comments`` (~7.3M rows)
 
     Each comment is linked to a video via ``video_id``.
 
     Attributes:
         comment_id: Auto-incremented internal ID (primary key).
-        id: Platform's native comment ID string.
+        id: YouTube's native comment ID string (unique).
         parent: Parent comment ID if this is a reply, else None.
-        video_id: Video ID this comment belongs to.
+        video_id: YouTube video ID this comment belongs to (foreign key -> videos).
         channel_name: Channel name of the video (denormalized).
         video_title: Title of the video (denormalized).
         video_views: View count of the video (denormalized).
@@ -119,21 +99,16 @@ class Comment:
         link: URL to the video (denormalized).
         text: The comment text content.
         like_count: Number of likes on this comment.
-        author_id: User ID of the commenter.
+        author_id: YouTube user ID of the commenter.
         author: Display name of the commenter.
         author_thumbnail: URL to the commenter's profile picture.
         author_is_uploader: True if the commenter is the video uploader.
         author_is_verified: True if the commenter has a verified badge.
-        author_url: URL to the commenter's channel.
+        author_url: URL to the commenter's YouTube channel.
         is_favorited: True if the comment was favorited by the uploader.
         _time_text: Relative time text (e.g. "2 months ago").
         timestamp: Date the comment was posted.
         is_pinned: True if the comment is pinned.
-        suppressed: Whether the comment has been deleted.
-        suppressed_at: Timestamp when the comment was flagged as deleted.
-        status: Content status. Values: ``"active"``, ``"suppressed"``.
-        last_update: Timestamp of suppression detection.
-        platform: Source platform. Values: ``"youtube"``, ``"tiktok"``.
     """
 
     comment_id: Optional[int] = None
@@ -161,83 +136,74 @@ class Comment:
     suppressed: Optional[bool] = None
     suppressed_at: Optional[str] = None
     status: Optional[str] = None
-    last_update: Optional[str] = None
-    platform: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# video_transcripts (unified view)
+# video_transcripts
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Transcript:
-    """Full transcript of a video (YouTube or TikTok).
+    """Full transcript of a video.
 
-    View: ``video_transcripts`` (~21,000 rows)
+    Table: ``video_transcripts`` (~21,000 rows)
 
     One row per video. Contains both the raw diarized transcript and a
     cleaned version.
 
     Attributes:
-        video_id: Video ID (primary key).
+        video_id: YouTube video ID (primary key, foreign key -> videos).
         original_diarized_transcript: Raw transcript with speaker diarization
             markers (e.g. ``[SPEAKER_00]: ...``).
-        cleaned_transcript: Cleaned version without diarization markers.
-        transcribed_at: Timestamp when the video was transcribed.
-        transcript_status: Status flag. Values:
-            ``"ok"`` (normal transcript),
-            ``"no_speech"`` (no detectable speech).
+        cleaned_transcript: Cleaned version of the transcript with
+            diarization markers removed.
+        transcript_status: Status flag for the transcript. Values:
+            ``"ok"`` (default, normal transcript),
+            ``"no_speech"`` (video has no detectable speech — music,
+            text-only, or silent video).
         transcript_status_at: Timestamp when the status was last set.
-        status: Content status (derived from parent video). Values:
-            ``"active"``, ``"suppressed"``.
-        platform: Source platform. Values: ``"youtube"``, ``"tiktok"``.
+        transcribed_at: Timestamp when the video was transcribed.
     """
 
     video_id: Optional[str] = None
     original_diarized_transcript: Optional[str] = None
     cleaned_transcript: Optional[str] = None
-    transcribed_at: Optional[str] = None
     transcript_status: Optional[str] = None
     transcript_status_at: Optional[str] = None
-    status: Optional[str] = None
-    platform: Optional[str] = None
+    transcribed_at: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# speakers_with_pol (unified view)
+# transcription_speakers
 # ---------------------------------------------------------------------------
 
 @dataclass
 class SpeakerSegment:
-    """A single speaker segment from a diarized transcript (YouTube or TikTok).
+    """A single speaker segment from a diarized transcript.
 
-    View: ``speakers_with_pol`` (~612K rows)
+    Table: ``transcription_speakers`` (~559K rows)
 
     Each row is one contiguous segment spoken by a single speaker in a video.
-    Segments are ordered by ``segment_order`` within each video. Includes
-    political content detection and aggregated sentence-level statistics.
+    Segments are ordered by ``segment_order`` within each video.
 
     Attributes:
         transcript_speaker_id: Auto-incremented internal ID (primary key).
-        video_id: Video ID.
+        video_id: YouTube video ID (foreign key -> videos).
         speaker: Speaker label (e.g. ``"SPEAKER_00"``, ``"SPEAKER_01"``).
         segment_order: Position of this segment in the transcript (0-indexed).
         speaker_transcript: Text spoken in this segment.
-        pol_detect_label: Political content classification. Values:
-            ``"political_yes"``, ``"political_no"``.
+        pol_detect_label: Political content classification. Indicates whether
+            the segment is political speech (policy discussion,
+            institutional references, electoral content, etc.) as opposed to
+            general commentary. Values: ``"political_yes"``, ``"political_no"``.
         pol_detect_label_id: Numeric ID of the classification label.
         pol_detect_probability: Classifier confidence score (0-1).
         pol_detect_ci_lower: Lower bound of the 95% confidence interval.
         pol_detect_ci_upper: Upper bound of the 95% confidence interval.
         pol_detect_language: Language detected for classification.
-        pol_detect_annotated: Whether this segment was manually annotated.
-        sentences_total: Total number of sentences in this segment.
-        sentences_political: Number of sentences classified as political.
-        pct_political: Percentage of political sentences (0-100).
-        avg_confidence: Average classifier confidence for political sentences.
-        status: Content status (derived from parent video). Values:
-            ``"active"``, ``"suppressed"``.
-        platform: Source platform. Values: ``"youtube"``, ``"tiktok"``.
+            Values: ``"EN"``, ``"FR"``, etc.
+        pol_detect_annotated: Whether this segment was manually annotated
+            (used as training data for the classifier).
     """
 
     transcript_speaker_id: Optional[int] = None
@@ -252,16 +218,10 @@ class SpeakerSegment:
     pol_detect_ci_upper: Optional[float] = None
     pol_detect_language: Optional[str] = None
     pol_detect_annotated: Optional[bool] = None
-    sentences_total: Optional[int] = None
-    sentences_political: Optional[int] = None
-    pct_political: Optional[float] = None
-    avg_confidence: Optional[float] = None
-    status: Optional[str] = None
-    platform: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# NER entities
+# comments_processed
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -279,15 +239,11 @@ class NEREntities:
     ORG: list[str] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# comments_processed
-# ---------------------------------------------------------------------------
-
 @dataclass
 class ProcessedComment:
     """A sentence-level processed version of a comment with NER annotations.
 
-    Table: ``comments_processed`` (YouTube + TikTok, ~9.8M rows)
+    Table: ``comments_processed`` (~9.8M rows)
 
     Each original comment is split into individual sentences. Each sentence
     gets its own row with NER (Named Entity Recognition) results.
@@ -296,9 +252,9 @@ class ProcessedComment:
     Attributes:
         comment_id: References the original comment (part of composite PK).
         sentence_id: Sentence index within the comment (part of composite PK, 0-indexed).
-        id: Platform's native comment ID string.
+        id: YouTube's native comment ID string.
         parent: Parent comment ID if this is a reply.
-        video_id: Video ID.
+        video_id: YouTube video ID.
         channel_name: Channel name (denormalized).
         video_title: Video title (denormalized).
         video_views: View count (denormalized).
@@ -307,12 +263,12 @@ class ProcessedComment:
         link: Video URL (denormalized).
         text: The individual sentence text.
         like_count: Like count on the original comment.
-        author_id: User ID of the commenter.
+        author_id: YouTube user ID of the commenter.
         author: Display name of the commenter.
         author_thumbnail: Commenter profile picture URL.
         author_is_uploader: True if commenter is the video uploader.
         author_is_verified: True if commenter has a verified badge.
-        author_url: Commenter's channel URL.
+        author_url: Commenter's YouTube channel URL.
         is_favorited: True if favorited by the uploader.
         _time_text: Relative time text.
         timestamp: Date the comment was posted.
@@ -320,6 +276,7 @@ class ProcessedComment:
         ner_entities: Named entities found in this sentence.
             A dict with keys ``"PER"`` (persons), ``"LOC"`` (locations),
             ``"ORG"`` (organizations), each mapping to a list of strings.
+            Example: ``{"PER": ["Macron"], "LOC": ["Paris"], "ORG": ["LFI"]}``
     """
 
     comment_id: Optional[int] = None
@@ -356,25 +313,23 @@ class ProcessedComment:
 class ProcessedSpeakerSegment:
     """A sentence-level processed version of a speaker segment with NER.
 
-    Table: ``transcription_speakers_processed`` (YouTube + TikTok, ~5.4M rows)
+    Table: ``transcription_speakers_processed`` (~5.4M rows)
 
     Each speaker segment is split into individual sentences. Each sentence
-    gets its own row with NER results and political speech classification.
+    gets its own row with NER results.
     The composite primary key is ``(transcript_speaker_id, sentence_id)``.
 
     Attributes:
         transcript_speaker_id: References the original speaker segment
             (part of composite PK).
         sentence_id: Sentence index within the segment (part of composite PK, 0-indexed).
-        video_id: Video ID.
+        video_id: YouTube video ID.
         speaker: Speaker label (e.g. ``"SPEAKER_00"``).
         segment_order: Position of the parent segment in the transcript.
         speaker_transcript: The individual sentence text.
         ner_entities: Named entities found in this sentence.
-            A dict with keys ``"PER"``, ``"LOC"``, ``"ORG"``.
-        pol_detect_label: Political speech classification for this sentence.
-            Values: ``"political_yes"``, ``"political_no"``.
-        pol_detect_probability: Classifier confidence (0-1).
+            A dict with keys ``"PER"``, ``"LOC"``, ``"ORG"``,
+            each mapping to a list of strings.
     """
 
     transcript_speaker_id: Optional[int] = None
@@ -389,21 +344,21 @@ class ProcessedSpeakerSegment:
 
 
 # ---------------------------------------------------------------------------
-# video_metadata_history (unified view)
+# video_metadata_history
 # ---------------------------------------------------------------------------
 
 @dataclass
 class MetadataSnapshot:
     """A point-in-time snapshot of video metadata.
 
-    View: ``video_metadata_history`` (YouTube + TikTok)
+    Table: ``video_metadata_history``
 
     One row per video per metadata scan. Use for longitudinal analysis
     of view counts, likes, subscriber growth, and title changes over time.
 
     Attributes:
         id: Auto-incremented snapshot ID.
-        video_id: Video ID.
+        video_id: YouTube video ID.
         video_views: View count at scan time.
         video_likes: Like count at scan time.
         video_comments_count: Comment count at scan time.
@@ -423,14 +378,14 @@ class MetadataSnapshot:
 
 
 # ---------------------------------------------------------------------------
-# channel_metadata_history (unified view)
+# channel_metadata_history
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ChannelSnapshot:
     """A point-in-time snapshot of channel metadata.
 
-    View: ``channel_metadata_history`` (YouTube + TikTok)
+    Table: ``channel_metadata_history``
 
     One row per channel per scan. Use for longitudinal analysis
     of channel growth (subscribers, video counts, etc.).
@@ -438,9 +393,9 @@ class ChannelSnapshot:
     Attributes:
         id: Auto-incremented snapshot ID.
         channel_name: Channel display name.
-        channel_id: Platform channel ID.
+        channel_id: YouTube channel ID.
         subscribers: Subscriber count at scan time.
-        total_videos_yt: Number of videos on the platform at scan time.
+        total_videos_yt: Number of videos on YouTube at scan time.
         total_videos_db: Number of videos in database at scan time.
         total_transcribed: Number of transcribed videos at scan time.
         total_comments_db: Number of comments in database at scan time.
@@ -456,15 +411,3 @@ class ChannelSnapshot:
     total_transcribed: Optional[int] = None
     total_comments_db: Optional[int] = None
     scanned_at: Optional[str] = None
-
-
-# ---------------------------------------------------------------------------
-# Search result models (returned by RPC search functions)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SearchResult:
-    """Base class for search results with ranking and highlighting."""
-    headline: Optional[str] = None
-    rank: Optional[float] = None
-    total_count: Optional[int] = None

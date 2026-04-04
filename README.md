@@ -62,9 +62,65 @@ for r in results:
 
 You need a JWT token to access the API. Contact the project administrators to obtain one.
 
-Tokens come in two levels:
-- **reader** — read-only access to all tables
-- **writer** — read and write access
+### Access Tiers
+
+Tokens are issued with one of five access tiers, each controlling which data you can query and how much you can use the API:
+
+| Tier | Label | Data Access | Search & Export |
+|------|-------|-------------|-----------------|
+| `metadata` | **Metadata** | Video & channel metadata only (title, views, dates, tags). No comments, transcriptions, or speaker data. | None |
+| `analyst_1` | **Analyst Tier 1** | Metadata + structural comment/transcription data (counts, timestamps, languages) — **without** comment text, author identifiers, or transcript content. | None |
+| `analyst_2` | **Analyst Tier 2** | Metadata + full transcription content (diarized transcripts, speaker segments, NER entities). Comments remain structural only (no text, no authors). | Transcription search & analysis only. No comment search, no bulk exports. |
+| `researcher` | **Researcher** | Full read access to all tables, including comments with text and author data. | All search, analysis, and export functions. |
+| `writer` | **Writer** | Full read + write access. Reserved for internal use. | All functions, no rate limits. |
+
+### Rate Limits
+
+All tiers except `writer` are subject to configurable rate limits, both **per day** (resets at midnight UTC) and **per lifetime** of the token:
+
+| Limit | Description |
+|-------|-------------|
+| **Requests / day** | Total API calls allowed per day |
+| **Requests total** | Lifetime cap on API calls |
+| **Searches / day** | Full-text search & analysis queries per day |
+| **Searches total** | Lifetime cap on search queries |
+| **Transcriptions / day** | Requests to transcription/speaker endpoints per day |
+| **Transcriptions total** | Lifetime cap on transcription data access |
+| **Exports / day** | Bulk export function calls per day |
+| **Exports total** | Lifetime cap on bulk exports |
+
+When a limit is reached, the API returns an HTTP error with a clear English message explaining which limit was hit and whether it resets daily or requires an upgrade. Example:
+
+```
+Daily search limit reached (50/50). Resets at midnight UTC.
+```
+
+```
+Lifetime request limit reached (5000/5000). Contact the administrator to upgrade your access.
+```
+
+Your specific limits depend on your token tier and may be customized by the administrator. Contact the project team to request an upgrade if needed.
+
+### Tier-Specific Endpoint Access
+
+Depending on your tier, some endpoints will return an error. Here is what each tier can access:
+
+| Endpoint | `metadata` | `analyst_1` | `analyst_2` | `researcher` | `writer` |
+|----------|-----------|------------|------------|-------------|---------|
+| `videos` | Full | Full | Full | Full | Full |
+| `metadata_history` | Full | Full | Full | Full | Full |
+| `channel_history` | Full | Full | Full | Full | Full |
+| `comments` | — | Structure only | Structure only | Full | Full |
+| `transcripts` | — | Status only | Full | Full | Full |
+| `speaker_segments` | — | Structure only | Full | Full | Full |
+| `processed_comments` | — | Structure only | — | Full | Full |
+| `processed_speaker_segments` | — | Structure only | Full | Full | Full |
+| `search_transcripts()` | — | — | Yes | Yes | Yes |
+| `search_speakers()` | — | — | Yes | Yes | Yes |
+| `search_comments()` | — | — | — | Yes | Yes |
+| `export_*()` | — | — | — | Yes | Yes |
+
+**Structure only** means you receive metadata columns (IDs, counts, timestamps, languages) but not the actual text content or author identifiers. This is enforced at the database level via filtered views.
 
 ## API Reference
 

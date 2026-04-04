@@ -2,6 +2,10 @@
 YouPol client — Pandas analysis examples.
 
 Requires: pip install youpol[pandas]
+
+Note: accessing comments, transcriptions, or export functions
+requires an appropriate access tier (analyst_2 or researcher).
+See the README for details.
 """
 
 from youpol import YouPol

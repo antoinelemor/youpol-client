@@ -2,6 +2,13 @@
 YouPol client — Quick start examples.
 
 Replace YOUR_TOKEN with your JWT token.
+
+Note: some endpoints require specific access tiers.
+  - metadata:    videos, metadata_history, channel_history
+  - analyst_1:   + structural comment/transcription data (no text/authors)
+  - analyst_2:   + full transcriptions + search (no comments)
+  - researcher:  + full comments, search, exports
+  - writer:      + write access (internal)
 """
 
 from youpol import YouPol
