@@ -25,7 +25,9 @@ from youpol.models import (
     ProcessedSpeakerSegment,
     MetadataSnapshot,
     ChannelSnapshot,
+    ActiveModel,
 )
+from dataclasses import fields as _dc_fields
 
 API_URL = "https://data.you-pol.com"
 MAX_PAGE_SIZE = 200  # Server-enforced maximum
@@ -183,7 +185,32 @@ class _TableEndpoint:
             params["offset"] = offset
 
         rows = self._session.get_paginated(self._table, params, limit=limit)
-        return [self._model(**row) for row in rows]
+        return [self._instantiate(row) for row in rows]
+
+    def _instantiate(self, row: dict):
+        """Turn a raw PostgREST row dict into a dataclass instance.
+
+        Handles two real-world cases:
+          (a) The table has gained new columns from a freshly-activated
+              classifier (e.g. ``hate_speech_label``, ``topics_scores``) that
+              the client dataclass doesn't declare — those land in the
+              instance's ``extras`` dict if present, else are silently dropped.
+          (b) The response is missing some fields that the dataclass declares
+              — the defaults on the dataclass kick in.
+        """
+        known = {f.name for f in _dc_fields(self._model)}
+        main_kwargs = {k: v for k, v in row.items() if k in known}
+        extras = {k: v for k, v in row.items() if k not in known}
+        inst = self._model(**main_kwargs)
+        if extras and 'extras' in known:
+            inst.extras = extras
+        elif extras:
+            # Attach as a plain attribute so users can still read dynamic data
+            try:
+                setattr(inst, 'extras', extras)
+            except Exception:
+                pass
+        return inst
 
     def get(self, **key_filters: Any):
         """Fetch a single row by primary key.
@@ -206,7 +233,7 @@ class _TableEndpoint:
         rows = self._session.get(self._table, params)
         if not rows:
             raise APIError(404, "NOT_FOUND", f"No row found with {key_filters}")
-        return self._model(**rows[0])
+        return self._instantiate(rows[0])
 
     def count(self, **filters: Any) -> int:
         """Count rows matching the given filters.
@@ -616,3 +643,75 @@ class YouPol:
         self.processed_speaker_segments = ProcessedSpeakerSegments(self._session)
         self.metadata_history = VideoMetadataHistory(self._session)
         self.channel_history = ChannelMetadataHistory(self._session)
+        self.models = Models(self._session)
+
+
+class Models(_TableEndpoint):
+    """Endpoint for the ``active_models`` view — discover which classifiers
+    the corpus currently carries, their label vocabulary, and which tables
+    hold their output columns.
+
+    The view is generated from ``model_registry`` + ``model_deployment`` and
+    always reflects the current admin-configured state.
+
+    Each row is an :class:`~youpol.models.ActiveModel` instance. Use it to
+    drive queries against the processed tables without hardcoding column
+    names:
+
+    .. code-block:: python
+
+        # Discover what's available
+        for m in client.models.list():
+            print(m.model_key, m.task_type, m.storage_key, m.api_tables)
+
+        # Build a select list with this model's output columns
+        m = client.models.get(model_key="pol_detect")
+        rows = client.processed_speaker_segments.list(
+            select="video_id,speaker_transcript," + ",".join(m.column_names),
+            limit=100,
+        )
+
+        # Filter on a single-label classifier's prediction
+        m = client.models.get(model_key="hate_speech")
+        toxic = client.processed_comments.list(**{
+            f"{m.storage_key}_label": "hate",
+            f"{m.storage_key}_probability": "gte.0.8",
+            "limit": 50,
+        })
+
+        # Filter multi-label — "at least one of these labels is active"
+        # Uses PostgREST's JSONB 'contains' operator on the active[] array.
+        m = client.models.get(model_key="topics_ml")
+        if m.is_multi_label:
+            sports_or_tech = client.processed_comments.list(**{
+                f"{m.storage_key}_scores->active": 'cs.["sports"]',
+                "limit": 50,
+            })
+
+        # Filter on a specific multi-label score threshold
+        politics_heavy = client.processed_comments.list(**{
+            f"{m.storage_key}_scores->scores->>politics": "gte.0.6",
+        })
+    """
+
+    _table = "active_models"
+    _model = ActiveModel
+
+    def get(self, *, model_key: str) -> ActiveModel:  # type: ignore[override]
+        """Convenience: fetch one model by model_key.
+
+        Example::
+
+            m = client.models.get(model_key="pol_detect")
+        """
+        return super().get(model_key=model_key)
+
+    def by_storage_key(self, storage_key: str) -> list:
+        """Return every active model sharing a given storage_key.
+
+        For storage_keys occupied by two active models on disjoint tables
+        (e.g. one ``pol_detect`` on transcripts + another on comments), this
+        returns both; pick the one whose ``api_tables`` match the table you
+        intend to query.
+        """
+        return self.list(storage_key=storage_key)

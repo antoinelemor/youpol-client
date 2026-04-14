@@ -19,14 +19,16 @@ from youpol.models import (
     Video, Comment, Transcript, SpeakerSegment,
     ProcessedComment, ProcessedSpeakerSegment,
     MetadataSnapshot, ChannelSnapshot,
-    NEREntities, SearchResult,
+    NEREntities,
+    ActiveModel,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __all__ = [
     "YouPol",
     "Video", "Comment", "Transcript", "SpeakerSegment",
     "ProcessedComment", "ProcessedSpeakerSegment",
     "MetadataSnapshot", "ChannelSnapshot",
-    "NEREntities", "SearchResult",
+    "NEREntities",
+    "ActiveModel",
 ]

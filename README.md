@@ -20,6 +20,7 @@ The YouPol database contains YouTube and TikTok political content data collected
 | `analytics_by_channel` | `analytics_by_channel` | — | Per-channel political speech aggregation |
 | `analytics_by_country` | `analytics_by_country` | — | Per-country political speech aggregation |
 | `analytics_by_gender` | `analytics_by_gender` | — | Per-gender political speech aggregation |
+| `models` | `active_models` | 1+ | Registry of every active classifier (single or multi-label) — discover columns, labels, deployment tables |
 
 ## Installation
 
@@ -246,6 +247,82 @@ df = client.videos.to_dataframe(
     limit=1000,
 )
 ```
+
+## Discovering classifiers (`client.models`)
+
+The YouPol corpus can host multiple classifiers at the same time — new ones are added via the admin panel without a client release. Use `client.models` to discover what is active and how its output is stored.
+
+```python
+for m in client.models.list():
+    print(m.display_name, m.storage_key, m.task_type, m.api_tables)
+
+pol = client.models.get(model_key="pol_detect")
+print(pol.label_list())        # ['political_no', 'political_yes']
+print(pol.column_names)        # ['pol_detect_label', 'pol_detect_label_id', ...]
+print(pol.display_label('political_yes'))  # 'Political' (admin-configured)
+```
+
+### Column conventions
+
+For every active model, the processed tables gain new columns whose names follow a fixed pattern based on the model's `storage_key`:
+
+| `task_type` | Columns added per target table |
+|---|---|
+| `single_label_classification` | `{sk}_label` (TEXT) · `{sk}_label_id` (float) · `{sk}_probability` (float) · `{sk}_language` (TEXT) · `{sk}_annotated` (BOOLEAN) |
+| `multi_label_classification` | `{sk}_scores` (JSONB) — single document holding `{scores: {label: prob}, active: [labels ≥ threshold], threshold, language, annotated}` |
+
+Two models can share a `storage_key` on **disjoint** tables (e.g. one pol_detect on transcripts, another on comments) — both write to the same `pol_detect_*` columns on their own tables. The admin UI enforces this is non-overlapping.
+
+### Filtering on a classifier's output
+
+Any column added by a classifier is immediately queryable — no client update needed. Use `m.column_names` in `select=` and plain kwargs in filter positions:
+
+```python
+# Single-label: exact label + probability range
+m = client.models.get(model_key="pol_detect")
+rows = client.processed_speaker_segments.list(**{
+    f"{m.storage_key}_label":       m.positive_label,   # eq.political_yes
+    f"{m.storage_key}_probability": "gte.0.9",
+    "limit": 20,
+})
+
+# Multi-label: at least one label active (JSONB contains)
+m = client.models.get(model_key="topics_ml")
+rows = client.processed_comments.list(**{
+    f"{m.storage_key}_scores->active": 'cs.["sports"]',
+    "limit": 50,
+})
+
+# Multi-label: score threshold on a specific label
+rows = client.processed_comments.list(**{
+    f"{m.storage_key}_scores->scores->>politics": "gte.0.6",
+})
+```
+
+Dynamic columns from freshly-deployed classifiers that the client dataclass doesn't declare are automatically attached to each row under `.extras`:
+
+```python
+rows = client.processed_comments.list(limit=1)
+print(rows[0].extras)
+# {'hate_speech_label': 'benign', 'topics_scores': {...}, ...}
+```
+
+### Display labels
+
+The admin can override how each raw label appears in API responses and on `data.you-pol.com`. The mapping ships on every model under `display_config.labels`:
+
+```python
+m = client.models.get(model_key="pol_detect")
+m.display_label("political_yes")   # "Political"
+m.display_label("political_no")    # "Non-political"
+
+# Or inspect the raw mapping
+print((m.display_config or {}).get("labels"))
+# {"political_yes": "Political", "political_no": "Non-political"}
+```
+
+The internal label values used in DB columns and filter params stay unchanged — only presentation changes.
+
 
 ## Database Schema
 

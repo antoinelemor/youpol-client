@@ -341,6 +341,114 @@ class ProcessedSpeakerSegment:
     ner_entities: Optional[dict] = None
     pol_detect_label: Optional[str] = None
     pol_detect_probability: Optional[float] = None
+    # Extra model columns are attached dynamically — see ClassifierResult.
+    extras: dict = field(default_factory=dict)
+
+
+@dataclass
+class ActiveModel:
+    """A classifier currently active in the YouPol registry.
+
+    Use ``client.models.list()`` to fetch this metadata. It tells you which
+    tables carry this model's output columns (for SELECT/WHERE construction),
+    its label vocabulary, and whether it is single- or multi-label.
+
+    Attributes:
+        model_id:               Registry primary key.
+        model_key:              Stable unique identifier.
+        storage_key:            Column prefix. Column names follow the
+                                convention in ``column_names``.
+        display_name:           Human-readable name.
+        description:            Free-form description set by the admin.
+        task_type:              ``"single_label_classification"`` — five scalar
+                                columns: ``{sk}_label``, ``{sk}_label_id``,
+                                ``{sk}_probability``, ``{sk}_language``,
+                                ``{sk}_annotated``.
+                                OR ``"multi_label_classification"`` — one
+                                JSONB column ``{sk}_scores`` holding
+                                ``{scores: {label: prob}, active: [labels
+                                above threshold], threshold, language,
+                                annotated}``.
+        num_labels:             Number of label classes.
+        label_map:              ``{"0": "label_a", "1": "label_b", ...}``.
+        positive_label:         For single-label binary: which label counts
+                                as positive. None for multi-class or
+                                multi-label.
+        multi_label_threshold:  Threshold used to materialize the ``active``
+                                array in the JSONB (None for single-label).
+        languages:              List of languages the model was trained on
+                                (ISO-2 codes).
+        primary_language:       Main training language.
+        base_model:             HuggingFace base model id.
+        target_text_type:       ``"transcripts"`` | ``"comments"`` | ``"both"``.
+        api_tables:             Tables where this model's columns are exposed
+                                via the API. Use to decide which processed
+                                endpoints to query.
+        worker_tables:          Tables where this model annotates incoming
+                                data in real time.
+        column_names:           The exact column names on each table,
+                                ready to use in ``select=`` lists.
+    """
+
+    model_id: Optional[int] = None
+    model_key: Optional[str] = None
+    storage_key: Optional[str] = None
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    task_type: Optional[str] = None
+    num_labels: Optional[int] = None
+    label_map: Optional[dict] = None
+    positive_label: Optional[str] = None
+    multi_label_threshold: Optional[float] = None
+    languages: Optional[list] = None
+    primary_language: Optional[str] = None
+    base_model: Optional[str] = None
+    target_text_type: Optional[str] = None
+    api_tables: list = field(default_factory=list)
+    worker_tables: list = field(default_factory=list)
+    column_names: list = field(default_factory=list)
+    activated_at: Optional[str] = None
+    # Admin-configured display config. Shape:
+    #   {"labels": {"political_yes": "Political", "political_no": "Non-political"}}
+    # Used by the explorer UI + external consumers that want pretty label names.
+    display_config: Optional[dict] = None
+
+    # Convenience helpers (not persisted; computed from fields)
+    @property
+    def is_multi_label(self) -> bool:
+        """True if this is a multi-label classifier (output is JSONB)."""
+        return self.task_type == "multi_label_classification"
+
+    def label_list(self) -> list:
+        """Return labels ordered by label_id (``["a", "b", "c"]``)."""
+        lm = self.label_map or {}
+        return [lm[k] for k in sorted(lm.keys(), key=lambda x: int(x))]
+
+    def display_label(self, raw_label: str) -> str:
+        """Return the admin-configured pretty name for a raw label, falling
+        back to the raw value if no override was set.
+
+        Example::
+
+            m = client.models.get(model_key="pol_detect")
+            pretty = m.display_label("political_yes")  # "Political"
+        """
+        if not raw_label:
+            return raw_label
+        labels = (self.display_config or {}).get("labels") or {}
+        return labels.get(raw_label, raw_label)
+
+    def scores_path(self, label: str) -> str:
+        """Return the PostgREST JSON-path fragment to filter on a specific
+        label's score for multi-label models.
+
+        Example (threshold on sports score):
+
+            client.processed_comments.list(**{
+                f"{m.storage_key}_scores->scores->>{label}": "gte.0.3"
+            })
+        """
+        return f"{self.storage_key}_scores->scores->>{label}"
 
 
 # ---------------------------------------------------------------------------
