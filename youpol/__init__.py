@@ -22,8 +22,9 @@ from youpol.models import (
     NEREntities,
     ActiveModel,
 )
+from youpol.filters import ModelFilter
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     "YouPol",
     "Video", "Comment", "Transcript", "SpeakerSegment",
@@ -31,4 +32,5 @@ __all__ = [
     "MetadataSnapshot", "ChannelSnapshot",
     "NEREntities",
     "ActiveModel",
+    "ModelFilter",
 ]
