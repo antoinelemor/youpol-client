@@ -412,6 +412,14 @@ class ActiveModel:
     #   {"labels": {"political_yes": "Political", "political_no": "Non-political"}}
     # Used by the explorer UI + external consumers that want pretty label names.
     display_config: Optional[dict] = None
+    # UI metadata (registry v4) — used by data.you-pol.com explorer to render
+    # consistent filter widgets / badges per model. Featured + high-priority
+    # models appear first in filter panels (the political slider stays at top).
+    priority: int = 0
+    featured: bool = False
+    ui_color: Optional[str] = None        # hex color used for badges/sliders
+    ui_short_name: Optional[str] = None   # compact label (≤ ~16 chars)
+    ui_positive_label_display: Optional[str] = None  # pretty name for positive_label
 
     # Convenience helpers (not persisted; computed from fields)
     @property
