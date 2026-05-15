@@ -611,6 +611,11 @@ class YouPol:
         speaker_segments: Access the ``transcription_speakers`` table.
         processed_comments: Access the ``comments_processed`` table.
         processed_speaker_segments: Access the ``transcription_speakers_processed`` table.
+        search: Semantic / hybrid / FTS search via the ``search_*_v2`` RPCs
+            (full transcripts, speaker segments, sentences, comments). Backed
+            by Qwen3-Embedding-8B (1024-dim halfvec) with instruction-aware
+            retrieval. See :class:`youpol.search.Search` for the four
+            methods and the ``instruction=`` argument.
 
     Example::
 
@@ -644,6 +649,10 @@ class YouPol:
         self.metadata_history = VideoMetadataHistory(self._session)
         self.channel_history = ChannelMetadataHistory(self._session)
         self.models = Models(self._session)
+        # Semantic + hybrid search namespace (Qwen3-Embedding-8B-backed).
+        # See youpol/search.py for full method docs.
+        from youpol.search import Search
+        self.search = Search(self._session, base_url)
 
 
 class Models(_TableEndpoint):

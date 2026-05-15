@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "youpol"
-version = "1.0.0"
+version = "1.3.0"
 description = "Python client for the YouPol research database API"
 readme = "README.md"
 license = {text = "MIT"}

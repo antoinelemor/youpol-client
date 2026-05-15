@@ -53,10 +53,13 @@ comments = client.comments.list(video_id=videos[0].video_id, limit=100)
 transcript = client.transcripts.get(video_id=videos[0].video_id)
 print(transcript.cleaned_transcript[:500])
 
-# Full-text search in comments (French stemming, ranked results)
-results = client.search_comments("immigration", page_size=10)
-for r in results:
-    print(r["headline"])  # HTML with <mark> tags highlighting matches
+# Search in comments — works in three modes:
+#   - "fts"      (default) French full-text search, exact words
+#   - "semantic" Qwen3 embedding similarity (1024-dim halfvec)
+#   - "hybrid"   reciprocal rank fusion of FTS + semantic
+hits = client.search.comments("immigration", mode="semantic", page_size=10)
+for h in hits:
+    print(f"  rank={h.rank:.3f}  {h['video_title']} :: {h['text'][:80]}")
 ```
 
 ## Authentication
@@ -167,34 +170,131 @@ video = client.videos.get(video_id="dQw4w9WgXcQ")
 n = client.comments.count(video_id="dQw4w9WgXcQ")
 ```
 
-### Full-Text Search
+### Search (FTS · Semantic · Hybrid)
 
-Four search methods use PostgreSQL full-text search with GIN indexes for fast, ranked results with highlighted excerpts:
+`client.search` exposes four methods covering the four corpus levels.
+Each accepts `mode="fts" | "semantic" | "hybrid"`:
+
+| `mode`     | Backend                          | When to use                              |
+|------------|----------------------------------|------------------------------------------|
+| `fts`      | PostgreSQL full-text (default)   | Exact words / lemmas, fast               |
+| `semantic` | Qwen3-Embedding-8B cosine        | Find meaning, paraphrases, related ideas |
+| `hybrid`   | Reciprocal Rank Fusion of both   | Best of both — same words *and* meaning  |
 
 ```python
-# Search videos by title, channel, or description (trigram similarity)
-results = client.search_videos("macron", platform_filter="youtube", page_size=20)
+# 1) Video-level (one row per video, full-transcript embedding)
+hits = client.search.full_transcripts(
+    "désastre migratoire",
+    mode="semantic",
+    country="FR",
+    page_size=10,
+)
 
-# Full-text search in comments (French stemming)
-results = client.search_comments("immigration", min_likes=5, page_size=20)
+# 2) Speaker-segment level (per speaker turn inside a video)
+hits = client.search.transcriptions(
+    "politique étrangère",
+    mode="hybrid",
+    page_size=20,
+)
 
-# Full-text search in transcripts
-results = client.search_transcripts("politique étrangère", page_size=10)
+# 3) Sentence level (finest granularity — main retrieval target)
+hits = client.search.sentences(
+    "réforme des retraites",
+    mode="semantic",
+    page_size=20,
+)
 
-# Full-text search in speaker segments
-results = client.search_speakers("réforme des retraites", page_size=10)
+# 4) Comments (raw, one row per comment)
+hits = client.search.comments(
+    "immigration",
+    mode="semantic",
+    min_likes=5,
+    page_size=20,
+)
+
+for h in hits:
+    print(f"rank={h.rank:.3f}  total={h.total_count}")
+    print(h["headline"])  # <mark>-wrapped snippet (FTS / hybrid only)
 ```
 
-All search methods return dicts with:
-- Original table columns
-- `headline` — text excerpt with `<mark>` tags highlighting matches
-- `rank` — relevance score
-- `total_count` — total number of matching results
+Every result is a `SearchResult` carrying:
+- `rank` — relevance score (cosine for semantic, ts_rank_cd for FTS,
+  RRF combined score for hybrid)
+- `total_count` — total matching rows (server-computed, capped at 2 000
+  for performance)
+- `extras` — all other columns the RPC returned. Access them by key
+  (`h["video_id"]`, `h["headline"]`, `h["model_labels"]`…) or via
+  `h.get("col", default)`.
 
-Optional parameters:
-- `suppressed_filter`: `None` (active only, default), `"only"` (deleted only), `"all"`
-- `platform_filter`: `None` (all), `"youtube"`, `"tiktok"`
-- `page_num`, `page_size`: pagination (1-indexed)
+#### Qwen3 instruction-aware retrieval
+
+Pass an `instruction=` string to bias semantic retrieval toward a
+specific intent (per Qwen3 docs: +1–5 % retrieval quality vs the
+default query prompt):
+
+```python
+# Default semantic: finds passages on the topic, regardless of stance
+hits_neutral = client.search.sentences("politique migratoire", mode="semantic")
+
+# Bias toward defending stance
+hits_defend = client.search.sentences(
+    "politique migratoire",
+    mode="semantic",
+    instruction="Find passages defending open immigration and refugee rights",
+)
+
+# Bias toward criticism / counter-arguments
+hits_counter = client.search.sentences(
+    "politique migratoire",
+    mode="semantic",
+    instruction="Find counter-arguments to immigration restrictions",
+)
+```
+
+#### Intersecting with classifier predictions
+
+Pass a `ModelFilter` to combine a semantic query with any classifier's
+predictions. Filters are evaluated **before** the embedding lookup, so
+they cut the candidate set efficiently:
+
+```python
+from youpol import ModelFilter
+
+flt = (ModelFilter()
+       .label("pol_detect", "political_yes")
+       .prob_range("pol_detect", min=0.8)
+       .video_pct("pol_detect", min=30, scope="tsp"))
+
+hits = client.search.sentences(
+    "immigration",
+    mode="hybrid",
+    instruction="Find passages with strong rhetorical framing",
+    model_filter=flt,
+    page_size=20,
+)
+```
+
+#### Graceful degradation
+
+When `mode="semantic"` is requested but the encoder daemon is unreachable
+(e.g. during a model swap), the call automatically falls back to
+`mode="fts"` and you still get results. Set `fallback_fts=False` to
+re-raise `SemanticUnavailable` instead.
+
+Common keyword arguments on every search method:
+
+| Argument             | Meaning                                                  |
+|----------------------|----------------------------------------------------------|
+| `mode`               | `"fts"` (default) `"semantic"` `"hybrid"`                |
+| `instruction`        | Qwen3 instruction for semantic / hybrid                  |
+| `ideas`              | Filter on `videos.ideas` (e.g. `["Far_right"]`)          |
+| `country`            | Filter on `videos.country` (`"FR"`, `"QC"`, …)           |
+| `year_from`/`year_to`| Inclusive upload-date bounds                             |
+| `channel`            | Substring match on `channel_name`                        |
+| `platform`           | `"youtube"` / `"tiktok"` / `None` (both)                 |
+| `suppressed_filter`  | `None` (active) / `"only"` (deleted) / `"all"`           |
+| `page_num`/`page_size` | 1-indexed pagination                                   |
+| `model_filter`       | `ModelFilter` for classifier cross-filtering             |
 
 ### Filtering
 

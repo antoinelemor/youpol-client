@@ -23,8 +23,9 @@ from youpol.models import (
     ActiveModel,
 )
 from youpol.filters import ModelFilter
+from youpol.search import Search, SearchResult, SemanticUnavailable
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __all__ = [
     "YouPol",
     "Video", "Comment", "Transcript", "SpeakerSegment",
@@ -33,4 +34,5 @@ __all__ = [
     "NEREntities",
     "ActiveModel",
     "ModelFilter",
+    "Search", "SearchResult", "SemanticUnavailable",
 ]
