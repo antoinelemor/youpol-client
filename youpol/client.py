@@ -653,6 +653,10 @@ class YouPol:
         # See youpol/search.py for full method docs.
         from youpol.search import Search
         self.search = Search(self._session, base_url)
+        # Raw embedding export + text encoding (researcher+). See
+        # youpol/embeddings.py for the bulk-export + encode() surface.
+        from youpol.embeddings import Embeddings
+        self.embeddings = Embeddings(self._session, base_url)
 
 
 class Models(_TableEndpoint):

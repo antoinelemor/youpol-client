@@ -24,8 +24,12 @@ from youpol.models import (
 )
 from youpol.filters import ModelFilter
 from youpol.search import Search, SearchResult, SemanticUnavailable
+from youpol.embeddings import (
+    Embeddings, SentenceEmbedding,
+    EmbeddingAccessDenied, EmbeddingsUnavailable,
+)
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __all__ = [
     "YouPol",
     "Video", "Comment", "Transcript", "SpeakerSegment",
@@ -35,4 +39,6 @@ __all__ = [
     "ActiveModel",
     "ModelFilter",
     "Search", "SearchResult", "SemanticUnavailable",
+    "Embeddings", "SentenceEmbedding",
+    "EmbeddingAccessDenied", "EmbeddingsUnavailable",
 ]

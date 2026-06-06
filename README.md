@@ -123,6 +123,7 @@ Depending on your tier, some endpoints will return an error. Here is what each t
 | `search_speakers()` | — | — | Yes | Yes | Yes |
 | `search_comments()` | — | — | — | Yes | Yes |
 | `export_*()` | — | — | — | Yes | Yes |
+| `embeddings.*` (raw vector export) | — | — | — | Yes | Yes |
 
 **Structure only** means you receive metadata columns (IDs, counts, timestamps, languages) but not the actual text content or author identifiers. This is enforced at the database level via filtered views.
 
@@ -295,6 +296,60 @@ Common keyword arguments on every search method:
 | `suppressed_filter`  | `None` (active) / `"only"` (deleted) / `"all"`           |
 | `page_num`/`page_size` | 1-indexed pagination                                   |
 | `model_filter`       | `ModelFilter` for classifier cross-filtering             |
+
+### Raw embedding export (`client.embeddings`) — researcher+
+
+Every transcript sentence, speaker segment, full transcript, and processed
+comment carries a **Qwen3-Embedding-8B** vector (`halfvec(1024)`). With a
+**researcher** or **writer** token you can bulk-export those raw vectors —
+reproducibly, and without loading the 16 GB model locally:
+
+```python
+import numpy as np
+from youpol import YouPol
+
+cli = YouPol(token="<researcher token>")
+
+# Stream every FR far-right *political* sentence embedding (keyset-paginated,
+# so a full-corpus pull is linear, not quadratic, in the number of rows).
+rows = cli.embeddings.sentences(
+    ideas=["Far_right"], country="FR", platform="youtube",
+    pol_detect_label="political_yes", pol_detect_prob_min=0.5,
+    page_size=2000, progress=True,
+)
+X = np.asarray([r["embedding"] for r in rows], dtype=np.float32)   # (N, 1024)
+# each row: transcript_speaker_id, sentence_id, video_id, channel_id,
+#           channel_name, upload_date, ideas_label, country_code, platform, embedding
+```
+
+Sibling exporters cover the other corpus levels:
+`client.embeddings.speaker_segments(...)`, `.full_transcripts(...)`,
+`.comments(...)`. All accept the same video-level filters and keyset-paginate
+on their primary key.
+
+**Encoding text in the same space.** `client.embeddings.encode()` runs text
+through the server's encoder daemon, so a prototype built from seed passages is
+directly comparable to the exported corpus vectors (same model, same version):
+
+```python
+seed = ["Les hiérarchies naturelles organisent la société.",
+        "La démocratie est inefficace et doit être remplacée."]
+proto = np.asarray(cli.embeddings.encode(seed), dtype=np.float32).mean(0)  # passage mode
+proto /= np.linalg.norm(proto)
+nrx_score = X @ proto      # cosine of every sentence to the NRx prototype
+```
+
+`encode(text)` returns one vector for a `str`, or a list of vectors for a list
+of strings (≤ 256). It defaults to **passage** mode (`is_query=False`); pass
+`is_query=True` (and optionally `instruction=`) for query-style encoding.
+
+Notes:
+- The export RPCs are granted to **researcher / writer** only; a lower tier
+  raises `EmbeddingAccessDenied`. Bulk pulls count against the **transcription**
+  quota.
+- If the encoder daemon is briefly suspended (admin pause or memory-pressure
+  auto-suspend), `encode()` raises `EmbeddingsUnavailable` with
+  `.temporarily_disabled = True`.
 
 ### Filtering
 
