@@ -478,6 +478,104 @@ print((m.display_config or {}).get("labels"))
 
 The internal label values used in DB columns and filter params stay unchanged — only presentation changes.
 
+### The eleven SIED theme classifiers (IDS-NRx)
+
+Beyond `pol_detect`, the corpus now carries **eleven sentence-level theme
+classifiers** — one per ideological motif of the *SIED* (Score Idéologique
+d'Extrême Droite) / IDS-NRx coding scheme. They replace the earlier single
+multi-theme model with **eleven independent single-label (one-vs-all)
+detectors**, which proved more robust on these sparse, heterogeneous motifs.
+
+**They run *only inside political sentences.*** Each theme classifier is gated
+on `pol_detect`: a sentence is theme-annotated **only if
+`pol_detect_label = 'political_yes'`**. Non-political sentences keep their theme
+columns `NULL`. The classifiers are applied to speaker-segment sentences
+(`processed_speaker_segments`), not to comments. So a theme prediction always
+reads as *"among political speech, does this sentence raise theme X?"*
+
+Each theme is a `single_label_classification` model with `storage_key`
+`theme_<name>`, labels `yes` / `no`, and therefore the columns
+`theme_<name>_label` · `theme_<name>_label_id` · `theme_<name>_probability` ·
+`theme_<name>_language` · `theme_<name>_annotated` on the processed
+speaker-segment table.
+
+| `storage_key` | Theme | NRx? | What the sentence raises | Decision | F1 | F1<sub>macro</sub> |
+|---|---|:--:|---|---|---:|---:|
+| `theme_ecology` | Ecology | † | accelerationist / "eco-realist" reframings of ecological politics | argmax | 93.4 | 95.6 |
+| `theme_immigration` | Immigration | | immigration framed as a threat to identity/security, or as needing stricter law | argmax | 93.0 | 95.3 |
+| `theme_technology` | Technology | † | acceleration, transhumanism, techno-optimism | argmax | 92.9 | 95.3 |
+| `theme_nationalism` | Nationalism | | the nation as an ethnic/organic community, or as under threat | argmax | 88.5 | 92.3 |
+| `theme_tradition` | Tradition | | traditional values, the family, heritage, a civilizational project | argmax | 86.0 | 90.6 |
+| `theme_libertarianism` | Libertarianism | † | the exit principle, jurisdictional arbitrage, autonomy against the state | argmax | 85.3 | 90.2 |
+| `theme_fictional_metaphors` | Fictional metaphors | † | ironic, mythological, fictional, "red-pill" registers | **prob ≥ 0.70** | 84.2 | 89.5 |
+| `theme_equality` | Equality | † | anti-egalitarianism: natural hierarchies, inequality as an ordering principle | argmax | 84.2 | 89.4 |
+| `theme_progress` | Progress | | social/moral progress framed as a threat to identity, or to be slowed down | **prob ≥ 0.90** | 83.9 | 89.1 |
+| `theme_democracy` | Democracy | | democracy as corrupt, inefficient, or to be left behind | argmax | 83.1 | 88.5 |
+| `theme_authority` | Authority | | the strong leader, order and security, the army and the police | argmax | 80.6 | 87.1 |
+
+`F1` is the positive-class ("yes") validation F1 of the deployed CamemBERT
+detector; `F1`<sub>macro</sub> is the two-class macro-average. Mean positive-class
+F1 across the eleven themes is **86.8 %**. The five **†** themes are the
+*neoreactionary (NRx)* motifs (equality, ecology, libertarianism, technology,
+fictional metaphors); the other six anchor the classical far-right repertoire.
+
+**Decision thresholds.** Nine themes label `yes`/`no` by argmax over the two
+classes. Two are deliberately conservative and require the positive probability
+to clear an explicit bar — **`theme_fictional_metaphors` at ≥ 0.70** and
+**`theme_progress` at ≥ 0.90** — so `theme_<name>_probability` can sit below
+0.5 for a `no` but a `yes` always means the bar was met. Always combine a label
+filter with the probability when you want to mirror the deployed decision.
+
+**How they were trained** (Boursier, Miranda & Lemor, 2026, *Identifying the
+Transnational Circulation of Neoreactionary Discourses*): the scheme extends the
+SIED far-right codebook to eleven sentence-level themes. A **GPT-5.4 teacher**
+annotated 100 000 political sentences against that codebook; the labels were
+validated against a **two-expert human audit** of 1 000 sentences (Light's
+*κ* = 0.979; teacher micro-F1 97.7 %). The validated labels were rebalanced to a
+1:3 positive-to-negative ratio (58 824 sentences) and **distilled into eleven
+one-vs-all CamemBERT-base students** (AdamW, lr 2·10⁻⁵, batch 16, 256-token
+truncation, best-validation epoch). The students recover most of the teacher's
+competence at a fraction of the inference cost, which is what makes corpus-wide
+deployment over ~335 000 political sentences feasible.
+
+```python
+# All sentences (within political speech) flagged with the ecology motif,
+# most confident first. Themes only exist where pol_detect = political_yes,
+# so the gate is implicit — but you can make it explicit:
+rows = client.processed_speaker_segments.list(**{
+    "pol_detect_label":       "political_yes",
+    "theme_ecology_label":    "yes",
+    "theme_ecology_probability": "gte.0.8",
+    "order": "theme_ecology_probability.desc",
+    "limit": 50,
+})
+
+# Mirror the deployed decision for a thresholded theme:
+rows = client.processed_speaker_segments.list(**{
+    "theme_progress_label":       "yes",       # already implies prob >= 0.90
+    "theme_progress_probability": "gte.0.90",  # belt-and-braces
+    "limit": 50,
+})
+
+# Cross-filter a semantic search with a theme, via ModelFilter:
+from youpol import ModelFilter
+flt = (ModelFilter()
+       .label("theme_immigration", "yes")
+       .prob_range("theme_immigration", min=0.7))
+hits = client.search.sentences(
+    "frontières",
+    mode="hybrid",
+    model_filter=flt,
+    page_size=20,
+)
+```
+
+The gating classifier itself, `pol_detect`, is a CamemBERTav2 binary detector
+(`political_yes` / `political_no`) that reaches **macro-F1 92.2 %** (accuracy
+93.5 % on a 1 753-sentence held-out set; human↔LLM Light's *κ* = 0.787). Only
+its `political_yes` sentences are routed to the eleven theme classifiers
+(Lemor & Boursier, 2026, *YouPol: A Collaborative Research Infrastructure…*).
+
 
 ## Database Schema
 
@@ -568,8 +666,14 @@ The internal label values used in DB columns and filter params stay unchanged �
 | `sentence_id` | int (PK) | Sentence index |
 | `speaker_transcript` | str | Sentence text |
 | `ner_entities` | dict | Named entities: `{"PER": [...], "LOC": [...], "ORG": [...]}` |
-| `pol_detect_label` | str | Political classification |
+| `pol_detect_label` | str | Political classification (`political_yes` / `political_no`) |
 | `pol_detect_probability` | float | Confidence (0-1) |
+| `theme_<name>_label` | str | Per-theme motif label `yes`/`no` — **only set where `pol_detect_label = 'political_yes'`** (see [SIED theme classifiers](#the-eleven-sied-theme-classifiers-ids-nrx)) |
+| `theme_<name>_probability` | float | Per-theme positive-class probability (0-1) |
+
+The eleven `theme_<name>_*` column families are added dynamically by the active
+theme classifiers and surface under `.extras` on each row; discover them with
+`client.models.list()`.
 
 ### `video_metadata_history` (VIEW — unified YouTube + TikTok)
 
