@@ -657,6 +657,10 @@ class YouPol:
         # youpol/embeddings.py for the bulk-export + encode() surface.
         from youpol.embeddings import Embeddings
         self.embeddings = Embeddings(self._session, base_url)
+        # Corpus-scale bulk export for analysis (researcher+): political
+        # sentences + per-theme P(yes), and per-video comment politicization.
+        from youpol.export import Export
+        self.export = Export(self._session, base_url)
 
 
 class Models(_TableEndpoint):

@@ -28,8 +28,9 @@ from youpol.embeddings import (
     Embeddings, SentenceEmbedding,
     EmbeddingAccessDenied, EmbeddingsUnavailable,
 )
+from youpol.export import Export, ExportAccessDenied
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 __all__ = [
     "YouPol",
     "Video", "Comment", "Transcript", "SpeakerSegment",
@@ -41,4 +42,5 @@ __all__ = [
     "Search", "SearchResult", "SemanticUnavailable",
     "Embeddings", "SentenceEmbedding",
     "EmbeddingAccessDenied", "EmbeddingsUnavailable",
+    "Export", "ExportAccessDenied",
 ]
